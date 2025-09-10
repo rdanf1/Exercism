@@ -1,0 +1,457 @@
+#!/usr/bin/env bash
+# DR - Signature :
+Ascension_2025="$(\
+(60*60*24*365*56-60*60*24*203-2*60*60)\
+)"
+date_DR="$(( $(date +%s --date="now") \
+             - Ascension_2025 ))"
+tail -n 1 "$0" | grep -q "^$" \
+  && date '+# DR - Ascension 2025 plus: %j days...' \
+   --date="@$((date_DR))" >> "$0"
+
+# Debug mode printf
+DEBUG=0
+
+printf2 () {
+  if [[ "$DEBUG" -gt "0" ]]
+  then
+    if [[ "$1" =~ '%' ]]
+    then
+        printf "$@"
+    else
+        printf '%s\n' "$*"
+    fi
+  fi
+  return 0
+}
+
+# Begin
+#
+shopt -s extglob
+Newline=$'\n'
+
+declare -a Alpha_ar=( {a..z} )
+declare -A Alpha_Aar=( )
+declare -i j=0
+
+for i in {a..z}
+do
+	Alpha_Aar+=( ["$i"]="$j" )
+	((j++))
+done
+
+printf2 "Alpha_ar :" "${Alpha_ar[0]}"
+printf2 "Alpha_Aar :" "${Alpha_Aar["a"]}"
+
+# Opts : Are managed (stored) then cutted from Args !
+# nb0  : Fixed some issues with options 'affine-cipher'.
+# Purpose : store options (if any)
+# nb: here all options are undocumented
+#                         (and with 0 effects! )
+#     try $'-x -y ee -zstk Ansi-C\nstring to\ntranspose'
+#
+# My traduction of '::' val. not required or sticky val!
+#   (=> afaics practically !!!)
+#
+store_Opts () {      #  had to add '$not_stky' for cancel/cut 
+                     #     modes to work properly..
+                     #  '+:' means optº comes as 1st args!
+  { ! TEMP0=$(getopt -o "+xy:k:z::" -n "$0" -- "$@") ;} \
+     && printf2 "%s" 'getopt error...' >&2
+  [ "$TEMP0" == "" ] && return 2
+  eval set -- "$TEMP0"
+  printf2 "TEMP0 after eval :" "$TEMP0"
+  while true
+  do
+    case "$1" in
+      '-'[a-z] )  
+                opt="${1/-/}"
+                Opts+=( ["$opt"]=1 )
+                Args="${Args/ $1/}"    # remove opt
+                Args="${Args/$1/}"    # or remove opt
+                #[[ "${Args:0:1}" == $'\n' ]] \
+                #  && Args="${Args/$'\n'/}"   \
+                [[ "${Args:0:1}" == ' ' ]] \
+                  && Args="${Args/ /}"   \
+                  && not_stky=1              \
+                  || not_stky=0       # need these !
+                printf2 "Args         : \n%s\n" "$Args"
+                printf2 "not sticky opt ? %s\n" "$not_stky"
+                shift
+                ;;
+          '--' )   
+                printf2 "End of options process" \
+                shift
+                break
+                ;;
+      +([a-z]) )  
+                Opts["$opt"]="$1"
+                #Args="${Args/$1$'\n'/}" # Always happened..
+                Args="${Args/ $1 /}"    # else not sticky ! 
+                Args="${Args/$1 /}"     # else is sticky  ! 
+                printf2 "Args         : \n%s\n" "$Args"
+                shift
+                ;;
+            '' )
+                printf2 "Opt %s : Warning Null value" \
+                        "$opt"
+                shift
+                ;;
+             * ) 
+                printf2 "Opt %s : Wrong value, removing.." \
+                        "$opt"
+                [[ "$not_stky" -eq 1 ]] \
+                && Args="-$opt"" $Args" \
+                || Args="-$opt""$Args"
+                printf2 "Args         : \n%s\n" "$Args"
+                unset "Opts[$opt]"
+                return 2  # An error value stops opt browsing..
+                ;;        # and option is restored as regular arg
+                #Args="-$opt"$'\n'"$Args" \
+                #|| Args="-$opt""$Args"
+    esac
+  done
+  # Nothing in there if no options(+val) provided
+  #  ( options *as defined* in 'getopt ..' statement above..)
+  printf2 "\n!Opts : ==%s\n==" "${!Opts[@]}"
+  printf2 "\n@Opts : ==%s\n==" "${Opts[@]}"
+}
+
+# Store arguments ( options + regulars )
+#
+#  => some changes here because of '<<< "input"'
+#   ( novelty used in @test bats file since "Transpose"..
+#     .. + File Input since "Tournament" exercism. )
+#
+store_Input () {
+  # No regression : keeping previous forms.
+  # Reading from '<<< "Ansi-C string", or a File
+  # or Classical arguments and their options if any.
+  # Todo : implies self calls for each line with args
+  #        implies input types caracterisation (3)
+  printf2 "\$1 is :==%s==\n" "$1"
+  printf2 "\$* is :==%s==\n" "$*"
+
+  # Enabled 'Input_From_File' mode
+  #   (assuming each line is a set of args for $0
+  #    this may mess up multiple lines input scripts,
+  #    $0 errors arn't managed.. )
+  # test several sets of args ie : 
+  #     $0 <<< $(echo {1..22}$'\n'<2d set>$'\n'<3rd...
+  Input_From_File=0
+  if [[ "$*" == "" ]]
+  then 
+    read -rt 0.02 -d'\n' Args
+    # read returns "exotic" values..
+    #  => test on $Args is required.
+    [ "$Args" != "" ] \
+      && Input_From_File=1
+  else
+    if [[ -e "$*" ]]
+    then
+      Args=$(cat "$*" 2>/dev/null) && \
+      Input_From_File=1            || \
+        { echo "Input File issue.." >&2
+          exit 33
+        }
+    else
+      Args=$(echo "$*" | xargs)
+      #Args="$*"
+    fi
+  fi
+  # " ' & ( ) ` |     <,> : $'\x3c', $'\x3e'
+  # Those above chars fails 'eval set -- $var'
+  #  and '&' is unstoppable..
+  #  .. though stopped here, 
+  #     (plus subst. chr, ie '_', if any used later)
+  echo "$Args" | grep -q '&\|_' \
+     && echo "invalid char input (&/_)"  \
+     && exit 11
+
+  # Restitution to standard positionnal arguments
+  #  ( if '<<< ..' or 'File' form input was used.. )
+  # nb: no quotes here lost input lines..
+  #  (though they arn't needed later because '$Args' 
+  #  is untouched exept if any options are given 
+  #  they're cutted from it)
+  #   'eval set' issue: 
+  #         errors occurs if Args quoted and $'\n'
+  #         unquoted and $';' ..
+  #
+  # nb : this is needed only to manage/store
+  #      options on next instruction 'store_Opts'
+  #
+  #eval set -- "${Args//';'/_}"  2>/dev/null
+  eval set -- $Args  2>/dev/null
+    # || { echo "invalid input" && exit 1 ;}
+  printf2 "Args1 EOL cut : ==%s==\n" "${Args//$'\n'*/}"
+  #printf2 "Args2 ';' subst '_' : ==%s==\n" "${Args//$';'/_}"
+  printf2 "Args : ==%s==\n" "$Args"
+
+  # Opts losts initials input lines
+  #  once stripped with 'getopt'
+  #   => Truncating above '$Args' directly = Ok
+  store_Opts "$@"
+
+  i=0
+  while read -r Input["i"]
+  do
+    if [[ Input_From_File -eq 1 ]]
+    then
+      $0 ${Input[i]}
+    else
+      break
+    fi
+    ((i++))
+  done < <(echo "$Args")
+
+  [[ Input_From_File -eq 1 ]] \
+    && printf2 "terminate File process" \
+    && exit 0
+  
+  printf2 "unset Input[%i] ==%s==\n" "$i" "${Input[i]}"
+  # Last value is an empty line  => to remove !
+  [[ ! -v "${Input[i]}" ]] || unset "Input[i]"
+
+  # Debuging check
+  for i in "${!Input[@]}"
+  do
+    printf2 "Input[%i] : %s\n" "$i" "${Input[i]}"
+  done
+  
+  IFS="$IFS2"
+  # "Flat" input for passing regex 
+  #       [@] or [*] preserves EOL
+  Input2="${Input[*]}"
+  #Input2="${Input[*]// /_}"
+  printf2 "Input2 : ==%s==\n" "$Input2"
+}
+
+test_regex () {
+# Conforms with @tests input pattern 
+#        
+REGEX_PARAM=\
+'[[:digit:]]\+'
+REGEX_PARAMS=\
+"^$REGEX_PARAM\( $REGEX_PARAM\)\{11,20\}$"
+
+REGEX_PARAM1=\
+'[[:digit:]]+'
+REGEX_PARAM2=\
+"^$REGEX_PARAM1( $REGEX_PARAM1){11,20}$" 
+
+  printf2 "$Input2" \
+      | grep -q "$REGEX_PARAMS" \
+     && printf2 'GREP QUOTED RegExpr Positive !' \
+     || printf2 'RegExpr Wrong as usual ! (grep)'
+
+  [[ "$Input2" =~ $REGEX_PARAM2 ]] \
+     && printf2 'UNARY OPERATOR UNQUOTED RegExpr Positive !' \
+     || printf2 'RegExpr Wrong as usual !  (=~) '
+}
+
+# Ckeck / List *All* arguments 
+# nb: getopts/positionnal args
+#  => space is "usually" separator
+#
+check_Args () {
+    opts=0
+    [ ! -v "$TEMP0" ] \
+ && eval set -- "$TEMP0" && opts=1
+    for arg
+    do  
+      if [[ "$opts" -eq 1 ]]
+      then
+        if [ "$arg" == '--' ]
+        then
+          opts=0
+        else
+          printf2 "Opt arg :     %s\n" "$arg"
+        fi
+      else  
+          printf2 "regular arg : %s\n" "$arg"
+      fi
+    done
+}
+
+test_params () {
+
+  store_Input "$@"
+  test_regex       # Uses '$Input2' (no need to pass $Args)
+
+      if echo "$Input2" | grep -q "1[1-9]"
+      then
+        echo "Pin count exceeds pins on the lane" \
+        && exit 1
+      fi
+  if [[ ! "$Input2" =~ $REGEX_PARAM2 ]]
+  then
+      
+      [ "$Input2" == "" ] \
+  && echo "Score cannot be taken until the end of the game" \
+        && exit 11
+
+      [[ "$Input2" =~ -[[:digit:]]+ ]] \
+        && echo "Negative roll is invalid" \
+        && exit 1
+      
+
+
+      if [ ! "$(echo "$Input2" | cut -d' ' -f 22)" == "" ]
+      then
+        echo "Cannot roll after game is over"
+        exit 111
+      fi
+            
+      printf2 "Input Wrong Regex"
+# in test wrong nb of args "Score cannot be taken..
+#                    comes after nb pins checks
+#                    so we "bypass" this..
+
+#echo " Usage : $0 [<<< $'Ansi-C string' or \"\$str\"]"$'\n'\
+#      "     or $0 [file]"$'\n'\
+#      "with    $0 <rollings> (1 to 20-22 max)"
+#
+      return 1
+  else
+      _19th="$(echo "$Input2" | cut -d' ' -f 19)"
+      _20th="$(echo "$Input2" | cut -d' ' -f 20)"
+      _21th="$(echo "$Input2" | cut -d' ' -f 21)"
+
+      if  { [ "$_20th" == "10" ] || \
+           [[ $((_19th + _20th)) -eq 10 ]] ;} \
+        && [ "$_21th" == "" ]
+      then
+        echo "Score cannot be taken until the end of the game"
+        exit 56
+      fi
+
+      check_Args
+
+
+      printf2 "Arguments Ok !"
+      return 0
+  fi
+}
+
+mk_Last () {
+  echo "Making Last..3: $3, 4: $4, 5: $5"
+  :
+}
+
+mk_Score () {
+  printf2 "Making Score.."
+  local -a args=( $Args )
+  local -i a=0 b=0 c=0 i=0 \
+           rolls=0 score=0 sum1=0
+  while [ "${args[i]}" != "" ]
+  do
+      printf2 "score : $score"
+      ((rolls++))
+      [[ "$rolls" -gt 10 ]] && break
+
+      if [ "${args[i+1]}" != "" ]
+      then
+        sum1=$(( args[i] + args[i+1] ))
+        printf2 "sum1 : $sum1"
+        if [ "${args[i+2]}" != "" ]
+        then
+             sum2=$(( args[i+1] + args[i+2] ))
+        else
+             sum2="${args[i+1]}"
+        fi
+      else
+        break
+      fi
+
+      if [[ "${args[i]}" -eq 10 ]]
+      then
+         printf2 "Strike !!!"
+         [[ $sum2 -gt 10 ]] \
+      && [[ "${args[i+1]}" -ne 10 ]] \
+      && [[ "${args[i+2]}" -ne 10 ]] \
+      && [[ "$rolls" -eq 10 ]] \
+      && echo "Pin count exceeds pins on the lane" \
+      && exit 22
+         [[ "${args[i+2]}" -eq 10 ]] \
+      && [[ "${args[i+1]}" -ne 10 ]] \
+      && [[ "$rolls" -eq 10 ]] \
+      && echo "Pin count exceeds pins on the lane" \
+      && exit 22
+
+         score+="$(( sum1 + args[i+2] ))"
+         ((i++)) ; prev_st=1
+         continue
+      fi
+
+      [[ $sum1 -gt 10 ]] \
+      && echo "Pin count exceeds pins on the lane" \
+      && exit 22
+          
+      if [[ $sum1 -eq 10 ]]
+      then
+         printf2 "Spair !"
+         score+=$(( sum1 + args[i+2] ))
+         ((i+=2)) ; prev_st=2
+         continue
+      fi
+
+      if  [[ "$prev_st" -eq 1 ]] || \
+          [[ "$prev_st" -eq 2 ]]
+      then
+            [ "${args[i+2]}" == "" ] \
+            && [[ "$rolls" -eq 10 ]] \
+            && break
+      fi
+
+      score+="$sum1"
+      ((i+=2)) ; prev_st=0
+  done
+
+      [[ "$rolls" -lt 10 ]] \
+  && echo "Score cannot be taken until the end of the game" \
+        && exit 22
+
+      [[ "$rolls" -eq 11 ]] \
+        && [[ "$prev_st" -eq 0 ]] \
+        && [ "${args[i]}" != "" ] \
+        && echo "Cannot roll after game is over" \
+        && exit 33
+
+      [[ "$rolls" -eq 11 ]] \
+        && [[ "$prev_st" -eq 1 ]] \
+        && [ "${args[i]}" == "" ] \
+  && echo "Score cannot be taken until the end of the game" \
+        && exit 44
+
+
+  echo "$score"
+}
+
+main () {
+    IFS2="$IFS"
+    IFS="$Newline"
+
+    declare TEMP0=""
+    declare -A Opts=( )
+    Args=""
+    declare -a Input=( )
+    declare Input2=""
+
+    test_params "$@"
+
+    case "$?" in
+  '0'|'1'|'2')  # Note : Args are passed unquoted
+                #      ( Otherwise only $1 exists! )
+                mk_Score $Args
+                ;;
+            *)  printf2 "An Invalid Input Occurred"
+                exit 1
+                ;;
+    esac
+    exit 0
+}
+
+main "$@"
+
+# DR - Ascension 2025 plus: 076 days...

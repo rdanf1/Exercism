@@ -1,0 +1,427 @@
+#!/usr/bin/env bash
+# DR - Ascension+68 2025 - no comments -188 lines = base !
+# 	186-226 = 40 lines	-      -144 without "^$"
+# Note : "printf2/DEBUG" lines should be removed too !!
+# NB: Go & See before this very un-commented exercism
+#     for further comments about the 144 (they might be outdated!)
+#
+# Opts : Are managed (stored) then cutted from Args !
+# todo : 0. Avoid 's/ /_/' "trick" 
+#        1. Forbidden input chars => Enable them.
+#
+# NB : This one was diffcult : (& my coding was poor..)
+#   => Again as for previous "Transpose" ::
+#   My outputs seemed Ok but werent for @tests !!!
+#   I managed to use backspace $'\b' for positionning
+#   before printing values => with an output to file
+#   and vi editing the issue seemed obvious,
+#   though on terminal outputs it wasnt "viewable".
+#   Last time for checking outputs,
+#   using simple surrounding chars at 
+#   begin/end of lines was enough,
+#   here, file outputs comparison was necessary !
+#
+ 
+shopt -s extglob
+
+# Debug mode printf
+DEBUG=0
+
+printf2 () {
+	if [[ "$DEBUG" -gt "0" ]]
+	then
+		if [[ "$1" =~ '%' ]]
+		then
+		    printf "$@"
+		else
+		    printf '%s\n' "$*"
+		fi
+	fi
+	return 0
+}
+
+# Purpose : store options (if any)
+# nb: here all options are undocumented ( and with 0 effects! )
+#     try $'-x -y ee -zstk Ansi-C\nstring to\ntranspose'
+store_Opts () {            #  '+:' means optº comes as 1sts args!
+	{ ! TEMP0=$(getopt -o "+xy:k:z::" -n "$0" -- "$@") ;} \
+     && printf2 "%s" 'getopt error...' >&2
+
+	printf2 "TEMP0 :" "$TEMP0"
+        [ "$TEMP0" == "" ] && return 2
+	#        to un-quote ?
+	eval set -- "$TEMP0"
+	printf2 "TEMP0 after eval set :" "$TEMP0"
+
+	while true
+	do
+	    case "$1" in
+
+  '-'[a-z] )	opt="${1/-/}"
+		Opts+=( ["$opt"]=1 )
+		printf2 "!Opts :" "${!Opts[@]}"
+		printf2 "Opts :" "${Opts[@]}"
+		Args="${Args/ $1 /}"  # 1st opt (or..)
+		Args="${Args/$1 /}"   # nth opt (or..)
+	    	Args="${Args/$1/}"    # sticky opt
+		shift
+		;;
+
+      '--' ) 	shift
+		break
+		;;
+
+  +([a-z]) )	Opts["$opt"]="$1"
+	    	Args="${Args/$1 /}"
+		printf2 "Opts :" "${Opts[@]}"
+		shift
+		;;
+
+	'' )	printf2 "Opts Warning:" "Null Chain Value"
+		printf2 "Opts is ====> -%s\n" "$opt"
+		shift
+		;;
+
+	 * )	printf2 "%s" 'Opts Invalid value !' >&2
+		printf2 'Opts Removing %s !' "$opt" >&2
+		Args="-$opt $Args"
+		unset "Opts[$opt]"
+		printf2 "!Opts :" "${!Opts[@]}"
+		printf2 "Opts :" "${Opts[@]}"
+		return 2 
+		;;
+	    esac
+	done
+}
+
+mk_Scores_header () {
+	printf2 "" "Building Header.."
+	echo \
+"Team                           | MP |  W |  D |  L |  P"
+}
+
+set_Scores () {
+ 	line_in="$1"
+		
+	score="${line_in/*;/}"
+	printf2 "score :" "$score"
+	team1="${line_in/;*/}"
+	printf2 "team1 :" "$team1"
+	echo "${Team[@]}"  | grep -q "$team1" \
+     || Team+=( "$team1" )
+
+	# because (afaics) names with spaces
+	#    cannot be reused (appended)
+	#    as new associative arrays indexes
+	#
+	_team1="${team1// /_}"
+
+	# 'M'atch played, 'W'ins, 'D'raws are enough to score
+	#  but adding 'P'oints makes it less complicated.
+	#
+	declare team1_P="$_team1"'_P' \
+	        team1_M="$_team1"'_M' \
+		team1_W="$_team1"'_W' \
+		team1_D="$_team1"'_D'
+	printf2 "team1_.. : $team1_M $team1_W"
+	
+	team2="${line_in/$team1;/}"
+	team2="${team2/;$score/}"
+	printf2 "team2 :" "$team2"
+	echo "${Team[@]}"  | grep -q "$team2" \
+     || Team+=( "$team2" )
+
+	_team2="${team2// /_}"
+	declare team2_P="$_team2"'_P' \
+	        team2_M="$_team2"'_M' \
+		team2_W="$_team2"'_W' \
+		team2_D="$_team2"'_D'
+
+	Teams["$team1_M"]="$((${Teams["$team1_M"]:=0} + 1))"
+	Teams["$team2_M"]="$((${Teams["$team2_M"]:=0} + 1))"
+
+case "$score" in
+'win' ) 
+	Teams["$team1_P"]="$((${Teams["$team1_P"]:=0} + 3))"
+	Teams["$team1_W"]="$((${Teams["$team1_W"]:=0} + 1))"
+	Teams["$team1_D"]="$((${Teams["$team1_D"]:=0} + 0))"
+	Teams["$team2_P"]="$((${Teams["$team2_P"]:=0} + 0))"
+	Teams["$team2_W"]="$((${Teams["$team2_W"]:=0} + 0))"
+	Teams["$team2_D"]="$((${Teams["$team2_D"]:=0} + 0))"
+				;;
+'loss') 
+	Teams["$team1_P"]="$((${Teams["$team1_P"]:=0} + 0))"
+	Teams["$team1_W"]="$((${Teams["$team1_W"]:=0} + 0))"
+	Teams["$team1_D"]="$((${Teams["$team1_D"]:=0} + 0))"
+	Teams["$team2_P"]="$((${Teams["$team2_P"]:=0} + 3))"
+	Teams["$team2_W"]="$((${Teams["$team2_W"]:=0} + 1))"
+	Teams["$team2_D"]="$((${Teams["$team2_D"]:=0} + 0))"
+				;;
+'draw')
+	Teams["$team1_P"]="$((${Teams["$team1_P"]:=0} + 1))"
+	Teams["$team1_W"]="$((${Teams["$team1_W"]:=0} + 0))"
+	Teams["$team1_D"]="$((${Teams["$team1_D"]:=0} + 1))"
+	Teams["$team2_P"]="$((${Teams["$team2_P"]:=0} + 1))"
+	Teams["$team2_W"]="$((${Teams["$team2_W"]:=0} + 0))"
+	Teams["$team2_D"]="$((${Teams["$team2_D"]:=0} + 1))"
+				;;
+* )
+	[[ "${Input[0]}" == "" ]] \
+     && mk_Scores_header && exit 0
+
+	echo "Invalid (case) input"
+	exit 11
+				;;
+esac
+
+}
+
+# Store arguments ( options + regulars )
+#
+#  => some changes here because of '<<< "input"'
+#   ( novelty used in @test bats file since "Transpose"..
+#     + File Input since "Tournament" exercism. )
+##############################################################
+# Sample for testing inputs : comment li.109 (and 108's '\') #
+##############################################################
+# for i in {2..9}{0..9} {2..9}{a..f} {a..f}{0..9} {a..f}{a..f} ; do ./transpose.sh <<< $(printf %b "-x -y yy -zstk Ansi-C\nstring to\ntranspose\n\x$i") ; printf %b "\x$i" ; read q ; done p
+# ############################################################
+store_Input () {
+	# reading from '<<< "Ansi-C string" (or a File!)
+	printf2 "\$1 is :==%s==\n" "$1"
+	printf2 "\$* is :==%s==\n" "$*"
+	if [[ "$*" == "" ]]
+	then 
+		read -r -d'\n' Args
+	else
+		Args=$(cat "$*" 2>/dev/null) \
+	   || { echo "Wrong File name" ; exit 1 ;}
+	fi
+	# " ' & ( ) ` |     <,> : $'\x3c', $'\x3e'
+	# Those above chars fails 'eval set -- $var'
+	#  and '&' is unstoppable..
+	#  .. though stopped here :
+	echo "$Args" | grep -q '&\|_' \
+     && echo "invalid input (&/_)"  \
+     && exit 11
+
+	# Restitution to standard positionnal arguments
+	# nb2 vvvvvvvvv -> ok with 2>/dev/null (4 corrector)
+	# nb: no quotes here (lost lines..) !
+	#   errors occurs if quoted and $'\n'
+	#                  unquoted and $';' ..
+	#   doing the latter with ';'->'_' substitution
+	# nb : this is needed only to manage/store
+	#      options on next instruction 
+	#      => no need to preserve regular args..
+	#
+	eval set -- "${Args//';'/_}"  2>/dev/null \
+    # || { echo "invalid input" && exit 1 ;}
+	printf2 "Args1 EOL cut : ==%s==\n" "${Args//$'\n'*/}"
+	printf2 "Args2 ';' subst '_' : ==%s==\n" "${Args//$';'/_}"
+	printf2 "Args : ==%s==\n" "$Args"
+
+	# Opts losts initials input lines
+	#  once stripped with 'getopt'
+	#   => Truncating above '$Args' directly = Ok
+	store_Opts "$@"
+
+	i=0
+	while read -r Input["i"]
+	do
+		set_Scores "${Input[i]}"
+		# very verbose debug:	
+		printf2 "!Teams : ==%s==" "${!Teams[@]}"
+		printf2 "@Teams : ==%s==" "${Teams[@]}"
+	
+		((i++))
+	done < <(echo "$Args")
+	
+
+	printf2 "unset Input[%i] ==%s==\n" "$i" "${Input[i]}"
+	# Last value is an empty line  => to remove !
+	unset "Input[i]"
+
+	# Debuging check
+	for i in "${!Input[@]}"
+	do
+		printf2 "Input[%i] : %s\n" "$i" "${Input[i]}"
+	done
+	# "Flat" input for passing regex 
+	#       [@] or [*] preserves EOL
+	#Input2="${Input[*]}"
+	Input2="${Input[*]// /_}"
+	printf2 "Input2 : ==%s==\n" "$Input2"
+}
+
+test_regex () {
+
+# Pretty much everything
+#        "print"able goes through..
+REGEX_PARAM=\
+''
+REGEX_PARAMM=\
+'[[:print:]]*'
+REGEX_PARAMS=\
+"^$REGEX_PARAM$REGEX_PARAMM$"
+
+REGEX_PARAM1=\
+''
+REGEX_PARA11=\
+'([[:print:]]*$)*'		# =~ is trickier than grep :
+REGEX_PARAM2=\
+"^$REGEX_PARAM1$REGEX_PARA11"	# removed trailing $ (!fails)
+				#    putting it in PARA11
+				# => lines of printables = OK!
+
+	printf2 "$Input2" \
+      | grep -q "$REGEX_PARAMS" \
+     && printf2 'GREP QUOTED RegExpr Positive !' \
+     && printf2 $? \
+     || printf2 'RegExpr Wrong as usual ! (grep)'
+
+	[[ "$Input2" =~ $REGEX_PARAM2 ]] \
+     && printf2 'UNARY OPERATOR UNQUOTED RegExpr Positive !' \
+     || printf2 'RegExpr Wrong as usual !  (=~) '
+}
+
+# Ckeck / List *All* arguments 
+# nb: getopts/positionnal args 
+#  => space is "usually" separator
+#
+check_Args () {
+
+    opts=0
+    [ ! -v "$TEMP0" ] \
+ && eval set -- "$TEMP0" && opts=1
+    for arg
+    do  
+	if [[ "$opts" -eq 1 ]]
+	then
+	    if [ "$arg" == '--' ]
+	    then
+		opts=0
+	    else
+		printf2 "Opt arg :     %s\n" "$arg"
+	    fi
+ 	else	
+		printf2 "regular arg : %s\n" "$arg"
+	fi
+    done
+}
+
+test_params () {
+
+	store_Input "$@"
+	test_regex "$Args"
+
+	if [[ ! "$Input2" =~ $REGEX_PARAM2 ]]
+	then
+	    printf2 "Input Wrong Regex"
+echo "Usage : $0 [<<< $'Ansi-C string' or \"\$str\"] \
+          or $0 [file]"
+	    return 1
+	else
+	    check_Args
+
+	    printf2 "Arguments Ok !"
+	    return 0
+	fi
+}
+
+mk_Scores () {
+	# Restitution of initial 
+	#    'Input Field Separator'
+        IFS="$IFS2"
+	results=""
+	printf2 "" "Building Scores Board.."
+
+        mk_Scores_header
+
+	for i in "${!Team[@]}"
+	do
+		team_M="${Team[i]// /_}"'_M'
+		team_W="${Team[i]// /_}"'_W'
+		team_D="${Team[i]// /_}"'_D'
+		team_P="${Team[i]// /_}"'_P'
+
+	 local -i n=31
+	 local str="${Team[i]}"
+	 dots=$(printf "%.0s " $(seq $((n-${#str})) ))
+	 results+=$(printf "%s%s|" "$str" "$dots")
+
+for j in "$team_M" "$team_W" "$team_D" "" "$team_P"
+do
+	# Complications with str2 as integer
+	#   and later printf %i though helped 
+	#   solving issues with backspaces..
+	#   	
+	local -i str2=0 size_str2=1
+	if [ "$j" == "" ]
+	then
+		str2="$((Teams["$team_M"] - Teams["$team_W"] \
+					- Teams["$team_D"] ))"
+	else
+		str2="${Teams[$j]}"
+	fi
+	n=2
+	[[ "$str2" -ge 10 ]] && size_str2=2
+	dot1=$( printf "%.0s " $(seq $n) )
+	dot2=$( printf "%.0s\b" $(seq $size_str2) )
+	# keeping str as a string was easier :
+	#dot2=$( printf "%.0s\b" $(seq ${#str}) )
+
+	if [ "$j" == "$team_P" ] 
+	then
+    results+=$(printf " %s%s%i" "$dot1" "$dot2" "$str2")
+	else	
+    results+=$(printf " %s%s%i |" "$dot1" "$dot2" "$str2")
+	fi
+done
+	    # nb : results+=$(printf '\n')
+	    #      => adds nothing !
+	    #      => ! there's a blank line (last..)
+	    results+=$'\n'
+	done
+
+	# A guess ! ( replacing space+backspace by "nada" ! )
+	#    nb: output appears to be the same but ..
+	#        .. @tests says NO !! (so escape sequences
+	#                              have to disappear..)
+	IFS=$'\b'
+	results="${results// $'\b'/}"
+
+	# x2 for 12! ( max 2 digits backwards done.. )
+	results="${results// $'\b'/}"
+
+	echo    "$results"           | \
+		grep -v "^$"         | \
+		sort -t '|' -k 6rn 
+}
+
+main () {
+    IFS2="$IFS"
+    IFS=$'\n'
+
+    declare -a Team=( )
+    declare -A Teams=( )
+
+    declare TEMP0=""
+    declare -A Opts=( )
+    Args=""
+    declare -a Input=( )
+    declare Input2=""
+
+    test_params "$@"
+
+    case "$?" in
+	    0)	mk_Scores "$@"
+		    ;;
+	    *)  printf2 "An Invalid Input Occurred"
+	        exit 1
+		    ;;
+    esac
+    exit 0
+}
+
+main "$@"
